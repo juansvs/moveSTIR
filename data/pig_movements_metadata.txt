@@ -1,0 +1,13 @@
+GPS tracking data on wild pigs collared in 2017 in Florida. See the associated manuscript for details on the study design.
+
+Columns
+-------
+
+- `latitude`: The latitude of a GPS fix
+- `longitude`: The longitude of a GPS fix
+- `date_time`: The date time of a GPS fix
+- `individual_ID`: Unique identifier for collared wild pigs
+- `UTMx`: The UTM Easting for the GPS fix (meters)
+- `UTMy`: The UTM Northing for the GPS fix (meters)
+
+The proj4 string for the UTM projection is: "+proj=utm +zone=17 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"

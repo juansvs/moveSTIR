@@ -1,0 +1,7 @@
+Data provides information on the sex of pigs used in the collaring study. The study is described in the associated manuscript.
+
+Columns
+-------
+
+- `individual_ID`: The unique identifier of wild pigs collared in the study. Matches `individual_ID` in `pig_movements.csv`.
+- `sex`: "M": Male, "F": Female
