@@ -6,7 +6,7 @@ This directory contains the code and data necessary to implement the "Movement-d
 	- `fit_and_predict_ctmm.R`: Script uses the CTMM package in R to fit the continuous time movement models to the observed GPS data from wild pigs.
 	- `process_transmission_kernels.py`: Script builds transmission kernels from the pig CTMMs and saves marginal summaries of the transmission kernels. The kernels themselves are quite large and are removed after the marginal information is processed.  
 	- `movestir_pig_movements.*`: A Jupyter notebook and rendered HTML that analyzes the MoveSTIR results from `process_transmission_kernels.py`.
-	- `calculate_hr_area.R`: Analyzes the spatial heterogeneity in infection risk within pig home ranges.
+	- `calculate_hr_area.R`: Analyzes the spatial heterogeneity in infection risk within pig home ranges and calculates home range overlap metrics.
 
 - `data/`
 	- `pig_movements.csv`: Observed GPS movement data for wild pigs
