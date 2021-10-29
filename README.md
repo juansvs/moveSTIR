@@ -26,8 +26,9 @@ To generate all the intermediate results, the scripts and notebooks should be ex
 
 1. `fit_and_predict_ctmm.R`: Uses the CTMM package in R to fit the continuous time movement models to the observed pig movements
 2. `process_transmission_kernels.py`: Builds transmission kernels from the pig CTMMs and saves marginal summaries of the transmission kernels as the kernels themselves are quite large.
-3. `movestir_pig_movements.ipynb`: Analyzes the marginal results from `process_transmission_kernels.py`
-4. `calculate_hr_area.R`: Analyzes the spatial heterogeneity in infection risk within pig home ranges.
+3. `calculate_hr_area.R`: Computes home range overlap estimates that are used to compare contact networks.
+4. `movestir_pig_movements.ipynb`: Analyzes the marginal results from `process_transmission_kernels.py`
+5. `calculate_hr_area.R`: Analyzes the spatial heterogeneity in infection risk within pig home ranges.
 
 Executing `moveSTIR_examples.ipynb` does not require any intermediate results.
 

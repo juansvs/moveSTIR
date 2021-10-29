@@ -40,23 +40,27 @@ fwrite(hr_dat, "../data/home_ranges_for_pigs.csv")
 
 # Load the FOI raster. 
 # NOTE: You first need to run moveSTIR_pig_movements.ipynb to generate foi_raster.tif
-foi = raster("../data/foi_raster.tif")
 
-# Average FOI in the full area 
-ratios = list()
-for(id in unq_collars){
+if(file.exists("../data/foi_raster.tif")){
 
-	mras = mask(foi, my_hrs[[id]])
-	vals = values(mras)
-	inarea = vals[!is.na(vals)]
-	lorenz = cumsum(sort(inarea, decreasing=T)) / sum(inarea)
-	inds = which(lorenz < 0.8)
-	num = inds[length(inds)]
-	area_of_high_foi = (num * 15.02 * 15.01)
+	foi = raster("../data/foi_raster.tif")
 
-	# 80% of the cumulative average FOI occurs in what percent of the home range area?
-	print(id)
-	ratios[[id]] = area_of_high_foi / hr_dat[pig == id]$hr_m2
+	# Average FOI in the full area 
+	ratios = list()
+	for(id in unq_collars){
+
+		mras = mask(foi, my_hrs[[id]])
+		vals = values(mras)
+		inarea = vals[!is.na(vals)]
+		lorenz = cumsum(sort(inarea, decreasing=T)) / sum(inarea)
+		inds = which(lorenz < 0.8)
+		num = inds[length(inds)]
+		area_of_high_foi = (num * 15.02 * 15.01)
+
+		# 80% of the cumulative average FOI occurs in what percent of the home range area?
+		print(id)
+		ratios[[id]] = area_of_high_foi / hr_dat[pig == id]$hr_m2
+	}
 }
 
 
