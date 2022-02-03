@@ -3,6 +3,7 @@ This directory contains the code and data necessary to implement the "Movement-d
 - `code/`: Contains the following files scripts and notebooks. All files also contain internal documentation
 	- `moveSTIR.py`: Contains the functions necessary to implement the MoveSTIR framework
 	- `moveSTIR_examples.*`: A Jupyter notebook and rendered HTML providing examples on MoveSTIR's capabilities using simulated data.
+	- `moveSTIR_tutorial.*`: A Jupyter notebook and rendered HTML showing a minimal workflow with MoveSTIR.
 	- `fit_and_predict_ctmm.R`: Script uses the CTMM package in R to fit the continuous time movement models to the observed GPS data from wild pigs.
 	- `process_transmission_kernels.py`: Script builds transmission kernels from the pig CTMMs and saves marginal summaries of the transmission kernels. The kernels themselves are quite large and are removed after the marginal information is processed.  
 	- `movestir_pig_movements.*`: A Jupyter notebook and rendered HTML that analyzes the MoveSTIR results from `process_transmission_kernels.py`.
