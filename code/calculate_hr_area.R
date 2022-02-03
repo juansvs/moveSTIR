@@ -68,7 +68,7 @@ if(file.exists("../data/foi_raster.tif")){
 
 
 # The first metric of home range overlap we compute is based on the calculation
-# given in Appendix S6 such that the metric is directly comparable to 
+# given in Appendix S9 such that the metric is directly comparable to 
 # the direct + indirect MoveSTIR output.  Specifically, we use the area of
 # overlap to directly calculate an FOI between two individuals.
 
@@ -87,7 +87,7 @@ for(i in 1:length(collars)){
 
 		int_shp = intersect(my_hrs[[ci]], my_hrs[[cj]])
 
-		# Check is there is any area of overlap
+		# Check if there is any area of overlap
 		if(is.null(int_shp)){
 			int_area = 0
 		} else {
@@ -101,7 +101,7 @@ for(i in 1:length(collars)){
 
 pathogen_decay = (1 / (24 * 60 * 5)) # 5 days on the minute scale
 
-# You have to scale foi by pathogen decay. See Appendix S6
+# You have to scale foi by pathogen decay. See Appendix S9
 foi_scaled = data.table((area_of_overlap_m2 / home_range_mult)) / (pathogen_decay)
 diag(foi_scaled) = 0 # You can't infect yourself, set diagonal to 0
 fwrite(foi_scaled, paste0("../data/home_range_overlaps_", "area", ".csv"))

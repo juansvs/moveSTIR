@@ -1,8 +1,7 @@
-Store the file `marginal_fois_step5_use_ctmm_True.pkl` in this folder.
+Store the files `marginal_fois_step5_use_ctmm_True_dd*.pkl` in this folder.
 
-To get the file `marginal_fois_step5_use_ctmm_True.pkl`, either run `code/process_transmission_kernels.py` or download the file from
+To get the files `marginal_fois_step5_use_ctmm_True_dd*.pkl`, either run `code/process_transmission_kernels.py` or download the file from the url below and unzip in this folder
 
-https://www.dropbox.com/s/d46s1smj4xmbs3l/marginal_fois_step5_use_ctmm_True.pkl?dl=0
-
+https://www.dropbox.com/s/c50apdxtf6q04g1/moveSTIR_marginal_fois.zip?dl=0
 
 This is a large file, which is why it is not included with the moveSTIR repository.

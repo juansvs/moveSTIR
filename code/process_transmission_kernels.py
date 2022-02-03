@@ -6,6 +6,15 @@ import seaborn as sns
 import scipy.interpolate as interp
 import moveSTIR as stir
 import os
+import logging
+from itertools import permutations
+import multiprocessing as mp
+
+logging.basicConfig(filename='timeit_movestir.log', format='%(asctime)s %(message)s',
+                    datefmt='%m/%d/%Y %I:%M:%S %p')
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logger.info("Initializing logger")
 
 """
 Process transmission matrices
@@ -53,8 +62,8 @@ def interpolate_all_trajectories(step, dat):
 
     return(all_fitted)
 
-
-def process_transmission_kernels(all_fitted, params, memory_map=True,
+def process_transmission_kernels(all_fitted, params,
+                                 process_marginal=True, memory_map=True,
                                  path=os.getcwd(), save_append=""):
     """
     Process transmission kernels to extract the marginals (row and column) sums.
@@ -79,6 +88,11 @@ def process_transmission_kernels(all_fitted, params, memory_map=True,
         distance_decay : float, Either max distance (cutoff) or mean distance (gaussian)
                          of contact function
         dd_type : str, 'cutoff' or 'gaussian'
+    process_marginal : bool
+        It True, supercedes memory map and processes the transmission kernel
+        row by row and doesn't save the transmission kernel to disk. This 
+        is the fastest option, but does not given you access to the full
+        transmission kernel.
     memory_map : bool
         If True use memory mapping to process transmission kernels.  This is
         necessary when trajectories are longer than about 20,000 steps as 
@@ -104,7 +118,7 @@ def process_transmission_kernels(all_fitted, params, memory_map=True,
         Pickled results are saved to disk as 
         `marginal_fois_{0}.pkl`.format(save_append).  The pickled results
         are a tuple that contain
-            (deposition marginal, foi direct marginal, foi indirect marginal,
+            (foi direct marginal, foi indirect marginal,
              host keys, parameter dictionary)
     """
 
@@ -127,44 +141,51 @@ def process_transmission_kernels(all_fitted, params, memory_map=True,
         for j, h2_nm in enumerate(host_keys):
 	    
             if i != j:
-                print("{0} of {1}".format(count, n*(n - 1)))
-                print("Working on {0} lag {1}".format(h1_nm, h2_nm))
+                logger.info("{0} of {1}".format(count, n*(n - 1)))
+                logger.info("Working on {0} lag {1}".format(h1_nm, h2_nm))
                 host1 = all_fitted[h1_nm].copy()
                 host2 = all_fitted[h2_nm].copy()
 
                 # Align time stamps. We are only comparing hosts where they overlap in time
-                mintime = np.max([np.min(host1.time), np.min(host2.time)])
-                maxtime = np.min([np.max(host1.time), np.max(host2.time)])
-                host1 = host1[(host1.time >= mintime) & (host1.time <= maxtime)].reset_index(drop=False)
-                host2 = host2[(host2.time >= mintime) & (host2.time <= maxtime)].reset_index(drop=False)
+                host1, host2 = stir.align_trajectories(host1, host2)
                 nt = len(host1)
 
                 try:
-                    if memory_map:
+
+                    if process_marginal:
+
+                        # Fastest option. Don't save the full transmission kernel, but process
+                        # kernel a row at a time.
+                        deltat, fois, _ = stir.transmission_kernel_summarize(host1, host2, pathogen_decay, distance_decay, 
+                                                                             dd_type=dd_type, with_params_dt=True,
+                                                                             beta=1, lam=1)
+                    elif memory_map:
+
+                        # Save the whole transmission kernel
                         # Use memory mapping for matrices that can't be stored
                         # in memory
                         datapath = os.path.join(path, "K_{0}lag{1}.dat".format(h1_nm, h2_nm))
                         deltat, K_1lag2, _ = stir.transmission_kernel(host1, host2, pathogen_decay, distance_decay, 
                                                                       dd_type=dd_type, max_size=1,
                                                                       file_path=datapath)
+                        fois = summarize_K(K_1lag2, deltat, nt, beta, lam) 
 
                     else:
                         deltat, K_1lag2, _ = stir.transmission_kernel(host1, host2, pathogen_decay, distance_decay, 
                                                                       dd_type=dd_type, max_size=20000)
 
-                    tres = summarize_K(K_1lag2, deltat, nt, beta, lam) 
+                        fois = summarize_K(K_1lag2, deltat, nt, beta, lam) 
 
                     # Remove Kmat from disk
                     if memory_map:
                         try:
                             os.remove(datapath)
-                        except FileNoteFoundError:
+                        except FileNotFoundError:
                             pass
 
                     time_range = host1.time.max() - host1.time.min()
-                    deposit[(i, j)] = (tres[0], time_range, deltat, host1.time.values)
-                    fois_direct[(i, j)] = (tres[1], time_range, deltat, host1.time.values)
-                    fois_indirect[(i, j)] = (tres[2], time_range, deltat, host1.time.values)
+                    fois_direct[(i, j)] = (fois[0], time_range, deltat, host1.time.values)
+                    fois_indirect[(i, j)] = (fois[1], time_range, deltat, host1.time.values)
 
                 except IndexError:
                     print("Error for {0} and {1}. No overlap".format(h1_nm, h2_nm))
@@ -172,9 +193,136 @@ def process_transmission_kernels(all_fitted, params, memory_map=True,
                 count += 1
 
     # Save results
-    pd.to_pickle((deposit, fois_direct, fois_indirect, host_keys, params), 
-                 os.path.join(path, "marginal_fois_{0}.pkl".format(save_append)))
+    pd.to_pickle((fois_direct, fois_indirect, host_keys, params), 
+                  os.path.join(path, "marginal_fois_{0}.pkl".format(save_append)))
     return(None)
+
+
+def process_transmission_kernels_mp(j, hids, maxnum, all_fitted, params, logger,
+                                    process_marginal=True, memory_map=True,
+                                    path=os.getcwd(), save_append=""):
+    """
+    Process transmission kernels to extract the marginals (row and column) sums.
+
+    Computes and saves one pairwise transmission kernel at a time up. Set up
+    for multiprocessing
+
+    Parameters
+    ----------
+    j : int
+        Counter
+    hids : tuple of strings
+        First entry is host 1 id, Second entry is host 2 id.
+    maxnum : int
+        Total number of transmission kernels to process
+    all_fitted : dict
+        Keys are host IDs that look up data frames that contain the discretized
+        CTMMs for the each host. NOTE: Make sure predicted CTMM values are at
+        the same discretized time steps for all hosts being compared.
+    params : dict
+        beta : float, acquisition rate
+        lam : float, deposition rate
+        pathogen_decay : float, Pathogen decay rate
+        distance_decay : float, Either max distance (cutoff) or mean distance (gaussian)
+                         of contact function
+        dd_type : str, 'cutoff' or 'gaussian'
+    logger : Logger class
+        For logging results
+    process_marginal : bool
+        It True, supercedes memory map and processes the transmission kernel
+        row by row and doesn't save the transmission kernel to disk. This 
+        is the fastest option, but does not given you access to the full
+        transmission kernel.
+    memory_map : bool
+        If True use memory mapping to process transmission kernels.  This is
+        necessary when trajectories are longer than about 20,000 steps as 
+        the transmission matrix cannot be held in RAM.  This function will 
+        save the transmission kernel to disk and use memory mapping to
+        manipulate it. 
+
+        WARNING: These matrices can be LARGE (potentially 
+        hundreds of GB or larger). Make sure you have
+        sufficient space on your disk or on an external hard drive. The 
+        transmission matrices are removed after processing the marginals.
+        If False, manipulates the transmission kernel in memory.
+    path : str
+        The path where the temporary memory mapped transmission kernel should
+        be saved, as well as the resulting marginal calculations.  Default
+        is the current working directory.
+    save_append : str
+        A string that will be appended to the saved results.
+
+    Returns
+    -------
+    None
+        Pickled results are saved to disk as 
+        `marginal_fois_{0}.pkl`.format(save_append).  The pickled results
+        are a tuple that contain
+            (deposition marginal, foi direct marginal, foi indirect marginal,
+             host keys, parameter dictionary)
+    """
+
+    beta = params['beta']
+    lam = params['lam'] 
+    pathogen_decay = params['pathogen_decay'] 
+    distance_decay = params['distance_decay'] 
+    dd_type = params['dd_type'] 
+
+    logger.info("{0} of {1}".format(j + 1, maxnum))
+    logger.info("Working on {0} lag {1}".format(*hids))
+    host1 = all_fitted[hids[0]].copy()
+    host2 = all_fitted[hids[1]].copy()
+
+    # Align time stamps. We are only comparing hosts where they overlap in time
+    host1, host2 = stir.align_trajectories(host1, host2)
+    nt = len(host1)
+
+    try:
+
+        if process_marginal:
+
+            # Fastest option. Don't save the full transmission kernel, but process
+            # kernel a row at a time.
+            deltat, fois, _ = stir.transmission_kernel_summarize(host1, host2, pathogen_decay, distance_decay, 
+                                                                 dd_type=dd_type, with_params_dt=True,
+                                                                 beta=params['beta'],
+                                                                 lam=params['lam'])
+        elif memory_map:
+
+            # Save the whole transmission kernel
+            # Use memory mapping for matrices that can't be stored
+            # in memory
+            datapath = os.path.join(path, "K_{0}lag{1}.dat".format(h1_nm, h2_nm))
+            deltat, K_1lag2, _ = stir.transmission_kernel(host1, host2, pathogen_decay, distance_decay, 
+                                                          dd_type=dd_type, max_size=1,
+                                                          file_path=datapath)
+            fois = summarize_K(K_1lag2, deltat, nt, beta, lam) 
+
+        else:
+            deltat, K_1lag2, _ = stir.transmission_kernel(host1, host2, pathogen_decay, distance_decay, 
+                                                          dd_type=dd_type, max_size=20000)
+
+            fois = summarize_K(K_1lag2, deltat, nt, beta, lam) 
+
+        # Remove Kmat from disk
+        if memory_map:
+            try:
+                os.remove(datapath)
+            except FileNotFoundError:
+                pass
+
+        # Save pairwise results
+        time_range = host1.time.max() - host1.time.min()
+        fois_direct = (fois[0], time_range, deltat, host1.time.values)
+        fois_indirect = (fois[1], time_range, deltat, host1.time.values)
+        pd.to_pickle((fois_direct, fois_indirect, params, hids), 
+                      os.path.join(path, "marginal_fois_{0}-{1}_{2}.pkl".format(save_append, *hids)))
+
+    except IndexError:
+        logger.info("Error for {0} and {1}. No overlap".format(h1_nm, h2_nm))
+
+    return("Completed")
+
 
 
 def summarize_K(K, deltat, n, beta, lam):
@@ -199,8 +347,8 @@ def summarize_K(K, deltat, n, beta, lam):
     Return
     ------
     : tuple
-    	(deposition marginal, foi direct marginal, foi indirect marginal)
-    	Direct marginal only extracts the diagonal
+    	(foi direct marginal, foi indirect marginal)
+    	Direct marginal only extracts the diagonal of transmission matrix
 
     """
 
@@ -211,19 +359,19 @@ def summarize_K(K, deltat, n, beta, lam):
         # Matrix is an array stored in memory
         Kmat = K
 
-    deposit = beta * lam * (Kmat*deltat).sum(axis=0)
+    # deposit = beta * lam * (Kmat*deltat).sum(axis=0)
     foi = beta * lam * (Kmat*deltat).sum(axis=1)
     foi_direct = beta * lam * (np.diagonal(Kmat)*deltat)
     foi_indirect = foi - foi_direct
 
-    res = (deposit, foi_direct, foi_indirect)
+    res = (foi_direct, foi_indirect)
     return(res)
 
 
 if __name__ == '__main__':
 	
 	# Load the pig data
-    dat = pd.read_csv("../data/pig_movements.csv")
+    dat = pd.read_csv("../data/marec_filter_utm.csv")
     dat = (dat.assign(datetime=lambda x: pd.to_datetime(x.date_time))
               .assign(unix_time = lambda x: x.datetime.astype(np.int64) / (60 * 10**9)))
 
@@ -247,18 +395,44 @@ if __name__ == '__main__':
 
     host_keys = list(all_fitted.keys())
 
-	# Process transmission kernels
-    params = dict(beta = 1, # Just need a proportion so absolute value doesn't matter here
-                  lam = 1, # Just need a proportion so absolute value doesn't matter here
-                  pathogen_decay = 1 / (24 * 60. * 5), # Average persistence pathogen of 5 day on the minute scale
-                  distance_decay = 10, # meters
-                  dd_type = "cutoff")
+    # Loop through different threshold values (in meters)
+    dd_vals = [1, 10]
 
-    # all_fitted_red = {1: all_fitted[1], 27: all_fitted[27]}
-    process_transmission_kernels(all_fitted, params, memory_map=True,
-                                 path="../results/trans_kernels",
-                                 save_append="step{0}_use_ctmm_{1}".format(step, use_ctmm))
+    for dd in dd_vals:
+
+        logger.info("Processing distance threshold value {0}".format(dd))
+
+    	# Process transmission kernels
+        params = dict(beta = 1, # Just need a proportion so absolute value doesn't matter here
+                      lam = 1, # Just need a proportion so absolute value doesn't matter here
+                      pathogen_decay = 1 / (24 * 60. * 5), # Average pathogen persistence of 5 days on the minute scale
+                      distance_decay = dd, # meters
+                      dd_type = "cutoff")
+
+        parallel = True
 
 
+        if not parallel:
+
+            # Process with no parallelization...takes ~40 minutes
+            process_transmission_kernels(all_fitted, params, process_marginal=True, memory_map=False,
+                                         path="../results/trans_kernels",
+                                         save_append="step{0}_use_ctmm_{1}_dd{2}".format(step, use_ctmm, dd))
+
+        else:
+
+            # Process with parallelization on 8 cores...takes ~10 minutes 
+            combos = list(permutations(host_keys, 2))[:]
+            maxnum = len(combos)
+            pool = mp.Pool(processes=8)
+            save_append = "step{0}_use_ctmm_{1}_dd{2}".format(step, use_ctmm, dd)
+            results = [pool.apply_async(process_transmission_kernels_mp, 
+                                  args=(j, hid, maxnum, all_fitted, params, logger, True, False, 
+                                        "../results/trans_kernels",
+                                        save_append)) for j, hid in enumerate(combos)]
+            results = [p.get() for p in results]
+            pool.close()
+
+        logger.info("Completed process")
 
 

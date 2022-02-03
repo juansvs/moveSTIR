@@ -14,173 +14,111 @@ Functions to implement MoveSTIR
 
 """
 
-def process_transmission_kernels(all_fitted, params, memory_map=True,
-                                 path=os.getcwd(), save_append=""):
+def transmission_kernel_summarize(h1_xy, h2_xy, pathogen_decay, distance_decay,
+                                  dd_type="gaussian", with_params_dt=False,
+                                  beta=1, lam=1):
     """
-    Process transmission kernels and extract the marginals (row and column) sums.
+    Compute summaries of the directional kernel functions K_{1 <- 2} for 
+    transmission weight for host 1 experiencing a force of
+    infection from host 2 (host 1 running into host 2 trajectory). 
 
-    Summing across rows (axis=1) is the deposition marginal 
-        - Deposition marginal: How a host's position at time t contributes to FOI 
-        in another host (a rate)
-    Summing across columns (axis=0) is the foi marginal
-        - The force of infection experienced by a host at time t from another 
-        host (a rate)
-
+    This is substantially faster than trying to compute the entire transmission
+    kernel. 
+    
     Parameters
     ----------
-    all_fitted : dict
-        Keys are host IDs that look up data frames that contain the discretized
-        CTMMs for the each host. As described in `transmission_kernel` each
-        DataFrame should have columns 'time', 'x', 'y'.
-
-        NOTE: Make sure predicted CTMM values are computed at the same 
-        discretized time steps for all hosts being compared. 
-    params : dict
-        beta : float, acquisition rate
-        lam : float, deposition rate
-        pathogen_decay : float, Path decay rate
-        distance_decay : float, Either max distance (cutoff) or mean distance (gaussian)
-                         of contact function
-        dd_type : str, 'cutoff' or 'gaussian'
-    memory_map : bool
-        If True use memory mapping to process transmission kernels.  This is
-        necessary when trajectories are longer than about 20,000 steps as 
-        the transmission matrix cannot be held in RAM.  This function will 
-        save the transmission kernel to disk and use memory mapping to
-        manipulate it. 
-
-        WARNING: These matrices can be LARGE (potentially 
-        hundreds of GB or larger). Make sure you have
-        sufficient space on your disk or on an external hard drive. The 
-        transmission matrices are removed after processing the marginals.
-        If False, manipulates the transmission kernel in memory.  
-
-    path : str
-        The path where the temporary memory mapped transmission kernel should
-        be saved, as well as the resulting marginal calculations.  Default
-        is the current working directory.
-    save_append : str
-        A string that will be appended to the saved results.
-
+    h1_xy : DataFrame
+        Dataframe with columns time, x, and y. 
+            'time': the time point where a spatial location was recorded. Must be equally spaced
+            'x': The x-coordinate spatial location
+            'y': The y-coordinate spatial location
+        The acquiring host
+    h2_xy : DataFrame
+        Same as h1_xy. The ordered time columns must be the same for h1_xy and h2_xy
+        The depositing host
+    pathogen_decay : float
+        Given exponential pathogen decay, the decay rate of the pathogen in the environment. Make sure the units match!
+    distance_decay : float
+        The distance decay parameter. Exact interpretation depends on dd_type.
+            dd_type == "gaussian": Parameter is the mean distance of the half normal
+            dd_type == "cutoff": Parameter is a the maximum distance beyond which transmission can't occur
+    dd_type : str
+        See options above
+    with_params_dt : bool
+        If True, multiply results by parameters beta and lambda and deltat. If
+        False, don't.
+    beta : float
+        Acquisition rate. Default is 1
+    lam : float
+        Deposition rate. Default is 1
+    
     Returns
     -------
-    None
-        Pickled results are saved to disk as 
-        `marginal_fois_{0}.pkl`.format(save_append).  The pickled results
-        are a tuple that contain
-            (deposition marginal, foi direct marginal, foi indirect marginal,
-             host keys, parameter dictionary)
+    : deltat, [fois_direct, fois_indirect], None
+        - Time step delta t
+        - Marginal summaries of the transmission kernel
+            - Direct foi felt by 1 from 2 (defined as the diagonal of the transmission kernel)
+            - Indirect foi felt by 1 from  2
+        - None
+
+    Notes
+    -----
+    This function never stores the full K_{1 <- 2} transmission kernel in memory.
+
+    NOTE: To be consistent with transmission_kernel, estimates are not yet
+    multiplied by deltat.
     """
+    
+    host1_xy = h1_xy.sort_values(by="time").reset_index()
+    host2_xy = h2_xy.sort_values(by="time").reset_index()
+    assert np.all(host1_xy.time == host2_xy.time), "Ordered times are not equal for h1_xy and h2_xy"
+    
+    # Check on the size of the dataframes
+    time = host1_xy.time.values
+    deltat = time[1] - time[0]
+    t = len(time)
+    fois_direct = np.empty(t)
+    fois_indirect = np.empty(t)
+    fois_all = np.empty(t)
 
-    host_keys = list(all_fitted.keys())
-    n = len(host_keys)
+    # Loop over rows...will be slow but won't use much memory
+    # Could potentially do this in chunks as well to effeciently vectorize
+    for i in range(t):
 
-    beta = params['beta']
-    lam = params['lam'] 
-    pathogen_decay = params['pathogen_decay'] 
-    distance_decay = params['distance_decay'] 
-    dd_type = params['dd_type'] 
+        x1 = host1_xy.x.values[i]
+        X2 = host2_xy.x.values
 
-    # Loop through pairwise sums
-    count = 1
-    fois_direct = {}
-    fois_indirect = {}
-    deposit = {}
+        y1 = host1_xy.y.values[i]
+        Y2 = host2_xy.y.values
 
-    for i, h1_nm in enumerate(host_keys):
-        for j, h2_nm in enumerate(host_keys):
-        
-            if i != j:
-                print("{0} of {1}".format(count, n*(n - 1)))
-                print("Working on {0} lag {1}".format(h1_nm, h2_nm))
-                host1 = all_fitted[h1_nm].copy()
-                host2 = all_fitted[h2_nm].copy()
+        dvect = np.sqrt(((x1 - X2)**2) + ((y1 - Y2)**2))
 
-                # Align time stamps. We are only comparing hosts where they overlap in time
-                mintime = np.max([np.min(host1.time), np.min(host2.time)])
-                maxtime = np.min([np.max(host1.time), np.max(host2.time)])
-                host1 = host1[(host1.time >= mintime) & (host1.time <= maxtime)].reset_index(drop=False)
-                host2 = host2[(host2.time >= mintime) & (host2.time <= maxtime)].reset_index(drop=False)
-                nt = len(host1)
+        # Weight distance
+        if dd_type == "cutoff":
+            # Top-hat contact function
+            dist_weight =  tophat_cf(dvect, distance_decay)
+        elif dd_type == "gaussian":
+            # Gaussian contact function
+            dist_weight = gaussian_cf(dvect, distance_decay)
+        else:
+            raise(TypeError("I don't recognize {0} for dd_type. Use 'cutoff' or 'gaussian'".format(dd_type)))
 
-                try:
-                    if memory_map:
-                        # Use memory mapping for matrices that can't be stored
-                        # in memory
-                        datapath = os.path.join(path, "K_{0}lag{1}.dat".format(h1_nm, h2_nm))
-                        deltat, K_1lag2, _ = stir.transmission_kernel(host1, host2, pathogen_decay, distance_decay, 
-                                                                      dd_type=dd_type, max_size=1,
-                                                                      file_path=datapath)
+        # TODO: Allow for generic survival function
+        x1_time = time[i] 
+        time_diff = (x1_time - time)
+        path_surv = np.exp(-pathogen_decay*time_diff)
+        path_surv = np.where(time_diff >= 0, path_surv, 0) 
 
-                    else:
-                        deltat, K_1lag2, _ = stir.transmission_kernel(host1, host2, pathogen_decay, distance_decay, 
-                                                                      dd_type=dd_type, max_size=20000)
+        if not with_params_dt:
+            all_foi = path_surv * dist_weight
+        else:
+            all_foi = (path_surv * dist_weight)*beta*lam*deltat
 
-                    tres = summarize_K(K_1lag2, deltat, nt, beta, lam) 
+        fois_all[i] = np.sum(all_foi)
+        fois_direct[i] = all_foi[i] # Extract the diagonal
+        fois_indirect[i] = fois_all[i] - fois_direct[i] # compute 
 
-                    # Remove Kmat from disk
-                    if memory_map:
-                        try:
-                            os.remove(datapath)
-                        except FileNoteFoundError:
-                            pass
-
-                    time_range = host1.time.max() - host1.time.min()
-                    deposit[(i, j)] = (tres[0], time_range, deltat, host1.time.values)
-                    fois_direct[(i, j)] = (tres[1], time_range, deltat, host1.time.values)
-                    fois_indirect[(i, j)] = (tres[2], time_range, deltat, host1.time.values)
-
-                except IndexError:
-                    print("Error for {0} and {1}. No overlap".format(h1_nm, h2_nm))
-
-                count += 1
-
-    # Save results
-    pd.to_pickle((deposit, fois_direct, fois_indirect, host_keys, params), 
-                 os.path.join(path, "marginal_fois_{0}.pkl".format(save_append)))
-    return(None)
-
-def summarize_K(K, deltat, n, beta, lam):
-    """
-    Given a transmission matrix K (in memory or memory mapped), compute
-    the marginal summaries
-
-    Parameters
-    ----------
-    K : array or str
-        If array, this is the transmission kernel
-        If str, this is the file path to the transmission kernel on disk
-    deltat : float
-        Time step
-    n : float
-        Size of K matrix
-    beta : float
-        Transmission parameter
-    lam : float
-        Shedding parameter
-
-    Return
-    ------
-    : tuple
-        (deposition marginal, foi direct marginal, foi indirect marginal)
-        Direct marginal only extracts the diagonal
-
-    """
-
-    if type(K) == str:
-        # Matrix is stored on disk
-        Kmat = np.memmap(K, dtype=np.float32, shape=(n, n))
-    else:
-        # Matrix is an array stored in memory
-        Kmat = K
-
-    deposit = beta * lam * (Kmat*deltat).sum(axis=0)
-    foi = beta * lam * (Kmat*deltat).sum(axis=1)
-    foi_direct = beta * lam * (np.diagonal(Kmat)*deltat)
-    foi_indirect = foi - foi_direct
-
-    res = (deposit, foi_direct, foi_indirect)
-    return(res)
+    return((deltat, (fois_direct, fois_indirect), None))
 
 
 def transmission_kernel(h1_xy, h2_xy, pathogen_decay, distance_decay,
@@ -497,6 +435,37 @@ def calculate_spatial_risk(host_df, foi, deltat, xbounds, ybounds, calc="cumulat
     return((spatial_foi, grids))
 
 
+def align_trajectories(host1, host2):
+    """
+    Align host movement trajectories to the same time window
+
+    Parameters
+    ----------
+    host1 : DataFrame
+        Dataframe with columns time, x, and y. 
+            'time': the time point where a spatial location was recorded. Must be equally spaced
+            'x': The x-coordinate spatial location
+            'y': The y-coordinate spatial location
+    host2 : DataFrame
+        Dataframe with columns time, x, and y. 
+            'time': the time point where a spatial location was recorded. Must be equally spaced
+            'x': The x-coordinate spatial location
+            'y': The y-coordinate spatial location
+
+    Returns
+    -------
+    : tuple
+        (host1, host2), aligned (truncated) host trajectories
+    """
+
+     # Align time stamps. We are only comparing hosts where they overlap in time
+    mintime = np.max([np.min(host1.time), np.min(host2.time)])
+    maxtime = np.min([np.max(host1.time), np.max(host2.time)])
+    host1 = host1[(host1.time >= mintime) & (host1.time <= maxtime)].reset_index(drop=False)
+    host2 = host2[(host2.time >= mintime) & (host2.time <= maxtime)].reset_index(drop=False)
+    return((host1, host2))
+
+
 def block_diag_offset(values):
     """
     Make a special block diagonal matrix on lower, off diagonal
@@ -752,7 +721,6 @@ def movement_R0_from_avg_foi(F, gamma):
     R0 = np.max(np.abs(np.linalg.eigvals(R)))
     return((R, R0, F, U))
 
-
 def movement_R0(host_trajs, params, perturb=None):
     """
     Calculate R0 from movement trajectories for an SIS model
@@ -773,8 +741,9 @@ def movement_R0(host_trajs, params, perturb=None):
     
     Returns
     -------
-    : tuple
-        (transmission kernel R, R0)
+    : tuple of length 4
+        (transmission kernel R, R0, 
+        F (blocked transmission matrix times deltat), U)
     """
     
     # Unpack params
@@ -819,7 +788,7 @@ def movement_R0(host_trajs, params, perturb=None):
                 # Transmission kernel
                 K = transmission_kernel(host_trajs[h1], host_trajs[h2], pathogen_decay, 
                                         distance_decay, dd_type=dd_type)[1]
-                K = (K * β * λ * deltat * deltat)
+                K = (K * β * λ * deltat) # Force of infection
                 Usub.append(Z)
                 Fsub.append(K)
 
@@ -841,7 +810,8 @@ def movement_R0(host_trajs, params, perturb=None):
 
     # Calculate R0
     I = np.eye(F.shape[0])
-    R = np.dot(F, np.linalg.inv((I - U)))
+    # Need to multiply by deltat to convert back to time units.
+    R = np.dot(F, np.linalg.inv((I - U)) * deltat)
     R0 = np.max(np.abs(np.linalg.eigvals(R)))
     
     return((R, R0, F, U))
