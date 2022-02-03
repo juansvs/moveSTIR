@@ -17,11 +17,11 @@ This directory contains the code and data necessary to implement the "Movement-d
 	- `ctmm_data/`: Folder contains the interpolated CTMM trajectories produced by `fit_and_predict_ctmm.R`
 	- `home_range_overlaps_*.csv`: Intermediate results from `calculate_hr_area.R`. Association matrices of home range overlap between pigs.
 - `results/`: Folder where figures will be saved
-	- `trans_kernels/`: Contains the intermediate results from  `process_transmission_kernels.py`. **NOTE**: These results will either need to be downloaded [here](https://www.dropbox.com/s/d46s1smj4xmbs3l/marginal_fois_step5_use_ctmm_True.pkl?dl=0) and stored in this folder OR the script `process_transmission_kernels.py` will need to executed. 
+	- `trans_kernels/`: Contains the intermediate results from  `process_transmission_kernels.py`. **NOTE**: These results will either need to be downloaded [here](https://www.dropbox.com/s/c50apdxtf6q04g1/moveSTIR_marginal_fois.zip?dl=0) and stored in this folder OR the script `process_transmission_kernels.py` will need to executed. 
 
 ## Workflow
 
-Users can explore the Jupyter notebook `movestir_pig_movements.ipynb` to examine how MoveSTIR can be applied to real movement data. First, the users will need to download or generate the file `marginal_fois_step5_use_ctmm_True.pkl`. See the information under the `results/` folder.
+Users can explore the Jupyter notebook `movestir_pig_movements.ipynb` to examine how MoveSTIR can be applied to real movement data. First, the users will need to download or generate the files `marginal_fois_step5_use_ctmm_True_dd*.pkl`. See the information under the `results/` folder.
 
 To generate all the intermediate results, the scripts and notebooks should be executed in the following order
 
@@ -31,5 +31,5 @@ To generate all the intermediate results, the scripts and notebooks should be ex
 4. `movestir_pig_movements.ipynb`: Analyzes the marginal results from `process_transmission_kernels.py`
 5. `calculate_hr_area.R`: Analyzes the spatial heterogeneity in infection risk within pig home ranges.
 
-Executing `moveSTIR_examples.ipynb` does not require any intermediate results.
+Executing `moveSTIR_examples.ipynb` and `moveSTIR_tutorial.ipynb` does not require any intermediate results.
 
