@@ -371,7 +371,7 @@ def summarize_K(K, deltat, n, beta, lam):
 if __name__ == '__main__':
 	
 	# Load the pig data
-    dat = pd.read_csv("../data/marec_filter_utm.csv")
+    dat = pd.read_csv("../data/pig_movements.csv")
     dat = (dat.assign(datetime=lambda x: pd.to_datetime(x.date_time))
               .assign(unix_time = lambda x: x.datetime.astype(np.int64) / (60 * 10**9)))
 
@@ -410,7 +410,6 @@ if __name__ == '__main__':
                       dd_type = "cutoff")
 
         parallel = True
-
 
         if not parallel:
 
